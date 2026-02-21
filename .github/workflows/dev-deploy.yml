@@ -26,7 +26,6 @@ jobs:
                 /builds/*.log /builds/*.dest /builds/*.tar.gz \
                 /builds/*.yaml /builds/*.sh
 
-      # -- Build all images --
       - name: Patch Dockerfile for Kaniko
         shell: bash
         run: |
@@ -45,6 +44,7 @@ jobs:
           sed -i 's/\$BUILDPLATFORM/linux\/amd64/g; s/\${BUILDPLATFORM}/linux\/amd64/g' Dockerfile
           sed -i 's/\$TARGETOS/linux/g; s/\${TARGETOS}/linux/g' Dockerfile
 
+      # -- Build all images --
       - name: Build mpcium image
         uses: jeff-vincent/kindling/.github/actions/kindling-build@main
         with:
@@ -64,16 +64,15 @@ jobs:
           labels: |
             app.kubernetes.io/part-of: mpcium
             apps.example.com/github-username: ${{ github.actor }}
+          dependencies: |
+            - type: consul
+            - type: nats
           env: |
             - name: NATS_URL
-              value: "nats://${{ github.actor }}-nats-server:4222"
+              value: "nats://${{ github.actor }}-mpcium-nats:4222"
             - name: CONSUL_HTTP_ADDR
-              value: "http://${{ github.actor }}-consul:8500"
-          dependencies: |
-            - type: nats
-            - type: consul
-
-      # NOTE: OAuth detected — run 'kindling expose' for a public HTTPS URL
+              value: "http://${{ github.actor }}-mpcium-consul:8500"
+          # NOTE: OAuth detected — run 'kindling expose' for a public HTTPS URL
 
       - name: Summary
         run: |
