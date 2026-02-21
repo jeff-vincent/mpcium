@@ -1,0 +1,81 @@
+name: Dev Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: "registry:5000"
+  TAG: "${{ github.actor }}-${{ github.sha }}"
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, "${{ github.actor }}"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Clean builds directory
+        shell: bash
+        run: |
+          rm -f /builds/*.done /builds/*.request /builds/*.processing \
+                /builds/*.apply /builds/*.apply-done /builds/*.apply-log \
+                /builds/*.apply-exitcode /builds/*.exitcode \
+                /builds/*.log /builds/*.dest /builds/*.tar.gz \
+                /builds/*.yaml /builds/*.sh
+
+      # -- Build all images --
+      - name: Patch Dockerfile for Kaniko
+        shell: bash
+        run: |
+          cd ${{ github.workspace }}
+          # Remove --platform=${BUILDPLATFORM} from FROM lines
+          sed -i 's/FROM --platform=\${BUILDPLATFORM} /FROM /g' Dockerfile
+          # Remove BuildKit ARG declarations
+          sed -i '/^ARG TARGETPLATFORM$/d' Dockerfile
+          sed -i '/^ARG TARGETARCH$/d' Dockerfile
+          sed -i '/^ARG BUILDPLATFORM$/d' Dockerfile
+          sed -i '/^ARG TARGETOS$/d' Dockerfile
+          sed -i '/^ARG TARGETVARIANT$/d' Dockerfile
+          # Replace architecture variables with concrete amd64 values
+          sed -i 's/\$TARGETARCH/amd64/g; s/\${TARGETARCH}/amd64/g' Dockerfile
+          sed -i 's/\$TARGETPLATFORM/linux\/amd64/g; s/\${TARGETPLATFORM}/linux\/amd64/g' Dockerfile
+          sed -i 's/\$BUILDPLATFORM/linux\/amd64/g; s/\${BUILDPLATFORM}/linux\/amd64/g' Dockerfile
+          sed -i 's/\$TARGETOS/linux/g; s/\${TARGETOS}/linux/g' Dockerfile
+
+      - name: Build mpcium image
+        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
+        with:
+          name: mpcium
+          context: ${{ github.workspace }}
+          image: "${{ env.REGISTRY }}/mpcium:${{ env.TAG }}"
+          timeout: "900"
+
+      # -- Deploy in dependency order --
+      - name: Deploy mpcium
+        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
+        with:
+          name: "${{ github.actor }}-mpcium"
+          image: "${{ env.REGISTRY }}/mpcium:${{ env.TAG }}"
+          port: "8080"
+          ingress-host: "${{ github.actor }}-mpcium.localhost"
+          labels: |
+            app.kubernetes.io/part-of: mpcium
+            apps.example.com/github-username: ${{ github.actor }}
+          env: |
+            - name: NATS_URL
+              value: "nats://${{ github.actor }}-nats-server:4222"
+            - name: CONSUL_HTTP_ADDR
+              value: "http://${{ github.actor }}-consul:8500"
+          dependencies: |
+            - type: nats
+            - type: consul
+
+      # NOTE: OAuth detected — run 'kindling expose' for a public HTTPS URL
+
+      - name: Summary
+        run: |
+          echo "🎉 Deploy complete!"
+          echo "🌐 http://${{ github.actor }}-mpcium.localhost"
