@@ -26,25 +26,22 @@ jobs:
                 /builds/*.log /builds/*.dest /builds/*.tar.gz \
                 /builds/*.yaml /builds/*.sh
 
-      - name: Patch Dockerfile for Kaniko
+      # -- Build all images --
+      - name: Patch mpcium Dockerfile for Kaniko
         shell: bash
         run: |
           cd ${{ github.workspace }}
-          # Remove --platform=${BUILDPLATFORM} from FROM lines
           sed -i 's/FROM --platform=\${BUILDPLATFORM} /FROM /g' Dockerfile
-          # Remove BuildKit ARG declarations
           sed -i '/^ARG TARGETPLATFORM$/d' Dockerfile
           sed -i '/^ARG TARGETARCH$/d' Dockerfile
           sed -i '/^ARG BUILDPLATFORM$/d' Dockerfile
           sed -i '/^ARG TARGETOS$/d' Dockerfile
           sed -i '/^ARG TARGETVARIANT$/d' Dockerfile
-          # Replace architecture variables with concrete amd64 values
           sed -i 's/\$TARGETARCH/amd64/g; s/\${TARGETARCH}/amd64/g' Dockerfile
           sed -i 's/\$TARGETPLATFORM/linux\/amd64/g; s/\${TARGETPLATFORM}/linux\/amd64/g' Dockerfile
           sed -i 's/\$BUILDPLATFORM/linux\/amd64/g; s/\${BUILDPLATFORM}/linux\/amd64/g' Dockerfile
-          sed -i 's/\$TARGETOS/linux/g; s/\${TARGETOS}/linux/g' Dockerfile
+          sed -i 's/go build /go build -buildvcs=false /g' Dockerfile
 
-      # -- Build all images --
       - name: Build mpcium image
         uses: jeff-vincent/kindling/.github/actions/kindling-build@main
         with:
@@ -61,6 +58,7 @@ jobs:
           image: "${{ env.REGISTRY }}/mpcium:${{ env.TAG }}"
           port: "8080"
           ingress-host: "${{ github.actor }}-mpcium.localhost"
+          health-check-path: "/actuator/health"
           labels: |
             app.kubernetes.io/part-of: mpcium
             apps.example.com/github-username: ${{ github.actor }}
@@ -68,14 +66,13 @@ jobs:
             - type: consul
             - type: nats
           env: |
-            - name: NATS_URL
-              value: "nats://${{ github.actor }}-mpcium-nats:4222"
             - name: CONSUL_HTTP_ADDR
-              value: "http://${{ github.actor }}-mpcium-consul:8500"
-          # NOTE: OAuth detected — run 'kindling expose' for a public HTTPS URL
+              value: "http://${{ github.actor }}-consul:8500"
+            - name: NATS_URL
+              value: "nats://${{ github.actor }}-nats-server:4222"
+          replicas: 1
+          service-type: ClusterIP
+          ingress-class: nginx
+          wait: true
 
-      - name: Summary
-        run: |
-          echo "🎉 Deploy complete!"
-          echo "🌐 http://${{ github.actor }}-mpcium.localhost"
-
+      # NOTE: OAuth detected — run 'kindling expose' for a public HTTPS URL
